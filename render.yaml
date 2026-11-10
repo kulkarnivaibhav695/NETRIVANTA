@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: netrivanta
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: NETRIVANTA_SECRET_KEY
+        generateValue: true
+      - key: NETRIVANTA_ADMIN_NAME
+        value: NETRIVANTA Administrator
+      - key: NETRIVANTA_ADMIN_EMAIL
+        sync: false
+      - key: NETRIVANTA_ADMIN_PASSWORD
+        sync: false
+      - key: NETRIVANTA_DATABASE_URL
+        sync: false

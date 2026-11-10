@@ -1,0 +1,18 @@
+services:
+  netrivanta:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      NETRIVANTA_DATABASE: /data/netrivanta.db
+      APP_ENV: production
+      NETRIVANTA_SECRET_KEY: ${NETRIVANTA_SECRET_KEY:?Set NETRIVANTA_SECRET_KEY in .env}
+      NETRIVANTA_ADMIN_NAME: ${NETRIVANTA_ADMIN_NAME:-NETRIVANTA Administrator}
+      NETRIVANTA_ADMIN_EMAIL: ${NETRIVANTA_ADMIN_EMAIL:?Set NETRIVANTA_ADMIN_EMAIL in .env}
+      NETRIVANTA_ADMIN_PASSWORD: ${NETRIVANTA_ADMIN_PASSWORD:?Set NETRIVANTA_ADMIN_PASSWORD in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    volumes:
+      - netrivanta_data:/data
+    restart: unless-stopped
+volumes:
+  netrivanta_data:

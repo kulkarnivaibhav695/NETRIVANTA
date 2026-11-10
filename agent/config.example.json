@@ -1,0 +1,6 @@
+{
+  "api_url": "http://127.0.0.1:8000",
+  "api_key": "PASTE_THE_VOLUNTEER_API_KEY_HERE",
+  "target_host": "example.com",
+  "max_test_bytes": 524288
+}
