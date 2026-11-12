@@ -277,9 +277,26 @@ def summary(user=Depends(current_user)):
         media=db.execute('SELECT COUNT(DISTINCT access_medium) n FROM volunteers WHERE active=1').fetchone()['n'];days=db.execute('SELECT MIN(substr(measured_at,1,10)) first_day,MAX(substr(measured_at,1,10)) last_day FROM measurements').fetchone()
         by=db.execute('SELECT access_medium,COUNT(*) n FROM volunteers WHERE active=1 GROUP BY access_medium').fetchall()
         return {'volunteers':v,'measurements':m,'access_media':media,'first_measurement_day':days['first_day'],'last_measurement_day':days['last_day'],'by_medium':[dict(r) for r in by]}
+def global_comparison_rows():
+    """Return the platform-wide verified dataset for administrator research analytics."""
+    with connect() as db:
+        return [dict(r) for r in db.execute(
+            "SELECT m.*,v.id volunteer_id,v.city,v.site_label,v.isp,v.access_medium,v.wifi_type,v.medium_status "
+            "FROM measurements m JOIN volunteers v ON v.id=m.volunteer_id "
+            "WHERE m.test_status='complete' AND v.medium_status='verified'"
+        ).fetchall()]
+
 @app.get('/api/dashboard/comparison')
 def comparison(user=Depends(current_user)):
-    with connect() as db:rows=[dict(r) for r in db.execute("SELECT m.*,v.id volunteer_id,v.city,v.site_label,v.isp,v.access_medium,v.wifi_type,v.medium_status FROM measurements m JOIN volunteers v ON v.id=m.volunteer_id WHERE m.test_status='complete' AND v.medium_status='verified'").fetchall()]
+    # The participant workspace is private: aggregate only endpoints owned by
+    # the authenticated account. Keep the same grouping dimensions and metrics.
+    with connect() as db:
+        rows = [dict(r) for r in db.execute(
+            "SELECT m.*,v.id volunteer_id,v.city,v.site_label,v.isp,v.access_medium,v.wifi_type,v.medium_status "
+            "FROM measurements m JOIN volunteers v ON v.id=m.volunteer_id "
+            "WHERE m.test_status='complete' AND v.medium_status='verified' AND v.user_id=?",
+            (user['id'],)
+        ).fetchall()]
     return grouped_comparison(rows)
 
 @app.get('/api/profile')
@@ -356,7 +373,7 @@ def admin_measurement_review(mid:int,status:str,user=Depends(admin_user)):
         audit(db,user,'measurement_review',mid,status)
     return {'id':mid,'review_status':status}
 @app.get('/api/admin/analytics')
-def admin_analytics(user=Depends(admin_user)):return comparison(user)
+def admin_analytics(user=Depends(admin_user)):return grouped_comparison(global_comparison_rows())
 @app.get('/api/admin/agents')
 def admin_agents(user=Depends(admin_user)):
     with connect() as db:return [dict(r) for r in db.execute("SELECT v.id,v.name,v.email,v.city,v.isp,v.access_medium,v.medium_status,v.active,v.created_at,MAX(m.measured_at) last_seen,COUNT(m.id) measurement_count FROM volunteers v LEFT JOIN measurements m ON m.volunteer_id=v.id GROUP BY v.id ORDER BY last_seen DESC").fetchall()]

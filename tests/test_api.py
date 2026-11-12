@@ -190,3 +190,50 @@ def test_password_change():
     assert r.status_code==200
     client.post('/api/auth/logout')
     assert client.post('/api/auth/login',json={'email':'password@example.org','password':'new-correct-horse-battery-staple'}).status_code==200
+
+def test_network_comparison_is_scoped_to_logged_in_volunteer_and_admin_stays_global():
+    """Participant comparison is private; admin analytics remain platform-wide."""
+    create_user('comparison-owner@example.org')
+    create_user('comparison-other@example.org')
+
+    def add_verified_records(email, city, isp, medium, wifi, latencies):
+        client.post('/api/auth/logout')
+        login = client.post('/api/auth/login', json={
+            'email': email, 'password': 'correct-horse-battery-staple'
+        })
+        assert login.status_code == 200
+        endpoint = client.post('/api/volunteers', json={
+            'city': city, 'isp': isp, 'access_medium': medium, 'wifi_type': wifi
+        })
+        assert endpoint.status_code == 200, endpoint.text
+        endpoint_id = endpoint.json()['id']
+        with connect() as db:
+            db.execute("UPDATE volunteers SET medium_status='verified' WHERE id=?", (endpoint_id,))
+            for index, latency in enumerate(latencies):
+                db.execute(
+                    "INSERT INTO measurements(volunteer_id,measured_at,latency_ms,test_status) VALUES(?,?,?,'complete')",
+                    (endpoint_id, f'2026-11-0{index+1}T10:00:00+00:00', latency)
+                )
+
+    add_verified_records('comparison-owner@example.org', 'Pune', 'ISP A', 'Fiber', 'ethernet', [20, 40])
+    add_verified_records('comparison-other@example.org', 'Mumbai', 'ISP B', 'Cellular', 'wifi', [900])
+
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login', json={
+        'email': 'comparison-owner@example.org', 'password': 'correct-horse-battery-staple'
+    })
+    personal = client.get('/api/dashboard/comparison')
+    assert personal.status_code == 200
+    personal_rows = personal.json()
+    assert len(personal_rows) == 1
+    assert personal_rows[0]['city'] == 'Pune'
+    assert personal_rows[0]['metrics']['latency_ms']['mean'] == 30.0
+    assert personal_rows[0]['measurement_count'] == 2
+
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login', json={
+        'email': 'admin@example.org', 'password': 'correct-horse-battery-staple'
+    })
+    global_rows = client.get('/api/admin/analytics')
+    assert global_rows.status_code == 200
+    assert len(global_rows.json()) >= 2
