@@ -39,6 +39,13 @@ def test_agent_registration_submission_and_privacy():
     assert client.get('/api/measurements').json()[0]['latency_ms']==22.5
     assert client.get('/api/measurements/mine').json()[0]['latency_ms']==22.5
     assert client.get('/api/volunteers').status_code==403
+    # The same authenticated account can register a second physical device.
+    second=client.post('/api/volunteers',json={'city':'Pune','isp':'Mobile ISP','access_medium':'Cellular','wifi_type':'mobile_data','device_label':'My mobile'})
+    assert second.status_code==200,second.text
+    endpoints=client.get('/api/volunteers/mine').json()
+    assert len(endpoints)==2
+    assert {e['device_label'] for e in endpoints}=={'','My mobile'}
+    assert second.json()['api_key'] != key
 
 def test_admin_review_and_admin_apis():
     create_user('admin@example.org','admin')
@@ -91,7 +98,7 @@ def test_browser_measurement_session_and_daily_analysis(monkeypatch):
     from app import main as main_module
     ist=timezone(timedelta(hours=5,minutes=30))
     monkeypatch.setattr(main_module,'current_ist',lambda:datetime(2026,11,10,14,0,tzinfo=ist))
-    payload={'endpoint_id':endpoint_id,'latency_ms':23.5,'jitter_ms':1.2,'download_mbps':80.0,'upload_mbps':12.0}
+    payload={'endpoint_id':endpoint_id,'latency_ms':23.5,'packet_loss_pct':10.0,'dns_delay_ms':18.75,'jitter_ms':1.2,'download_mbps':80.0,'upload_mbps':12.0}
     saved=client.post('/api/browser/measurements',json=payload)
     assert saved.status_code==200,saved.text
     assert saved.json()['session_name']=='afternoon'
@@ -99,6 +106,7 @@ def test_browser_measurement_session_and_daily_analysis(monkeypatch):
     assert duplicate.status_code==409
     history=client.get('/api/measurements/mine').json()
     assert history[0]['measurement_method']=='browser_http'
+    assert history[0]['packet_loss_pct']==10.0 and history[0]['dns_delay_ms']==18.75
     assert history[0]['session_date']=='2026-11-10'
     daily=client.get('/api/measurements/daily-averages').json()
     assert daily[0]['date']=='2026-11-10' and daily[0]['latency_ms']==23.5
@@ -148,15 +156,19 @@ def test_sqlite_upgrade_adds_session_columns_to_existing_measurements(tmp_path,m
     conn.executescript("""
     CREATE TABLE users(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',organization TEXT DEFAULT '',city TEXT DEFAULT '',state TEXT DEFAULT '',country TEXT DEFAULT '',consent INTEGER NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE volunteers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT NOT NULL UNIQUE,city TEXT NOT NULL,site_label TEXT NOT NULL DEFAULT '',isp TEXT NOT NULL,access_medium TEXT NOT NULL,medium_evidence TEXT NOT NULL DEFAULT '',medium_status TEXT NOT NULL DEFAULT 'self_reported',wifi_type TEXT NOT NULL DEFAULT 'unknown',device_label TEXT NOT NULL DEFAULT '',api_key TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,active INTEGER NOT NULL DEFAULT 1);
-    CREATE TABLE measurements(id INTEGER PRIMARY KEY AUTOINCREMENT,volunteer_id INTEGER NOT NULL,measured_at TEXT NOT NULL,latency_ms REAL,packet_loss_pct REAL,dns_delay_ms REAL,download_mbps REAL,upload_mbps REAL,jitter_ms REAL,loaded_jitter_ms REAL,target_host TEXT NOT NULL DEFAULT '',wifi_signal_dbm REAL,connection_interface TEXT NOT NULL DEFAULT '',test_status TEXT NOT NULL DEFAULT 'complete',error_detail TEXT NOT NULL DEFAULT '');
+    CREATE TABLE measurements(id INTEGER PRIMARY KEY AUTOINCREMENT,volunteer_id INTEGER NOT NULL,measured_at TEXT NOT NULL,latency_ms REAL,download_mbps REAL,upload_mbps REAL,jitter_ms REAL,loaded_jitter_ms REAL,target_host TEXT NOT NULL DEFAULT '',wifi_signal_dbm REAL,connection_interface TEXT NOT NULL DEFAULT '',test_status TEXT NOT NULL DEFAULT 'complete',error_detail TEXT NOT NULL DEFAULT '');
     """)
+    conn.execute("INSERT INTO measurements(volunteer_id,measured_at) VALUES(1,'2026-11-12T00:00:00')")
     conn.commit();conn.close()
     monkeypatch.setattr(database,'USE_POSTGRES',False)
     monkeypatch.setattr(database,'DB_PATH',str(old_db))
     database.init_db()
     with database.connect() as db:
         columns={r['name'] for r in db.execute('PRAGMA table_info(measurements)')}
-        assert {'review_status','session_date','session_name','timezone','measurement_method'} <= columns
+        assert {'review_status','session_date','session_name','timezone','measurement_method','packet_loss_pct','dns_delay_ms'} <= columns
+        existing = db.execute('SELECT id, measured_at FROM measurements WHERE id=1').fetchone()
+        assert existing is not None
+        assert existing['measured_at'] == '2026-11-12T00:00:00'
         indexes={r['name'] for r in db.execute('PRAGMA index_list(measurements)')}
         assert 'idx_measurement_successful_session' in indexes
 

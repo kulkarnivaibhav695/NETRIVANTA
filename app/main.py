@@ -93,6 +93,8 @@ class BrowserMeasurementIn(BaseModel):
     download_mbps: Optional[float] = Field(default=None, ge=0, le=10000)
     upload_mbps: Optional[float] = Field(default=None, ge=0, le=10000)
     target_host: str = 'netrivanta-controlled-http-probe'
+    packet_loss_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    dns_delay_ms: Optional[float] = Field(default=None, ge=0, le=60000)
 
 
 def current_ist():
@@ -153,7 +155,7 @@ def create_volunteer(data:AgentIn,user=Depends(current_user)):
     if data.access_medium not in allowed:raise HTTPException(422,'Unsupported access medium')
     key=secrets.token_urlsafe(36)
     with connect() as db:
-        try:cur=db.execute('INSERT INTO volunteers(user_id,name,email,city,site_label,isp,access_medium,medium_evidence,medium_status,wifi_type,device_label,api_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(user['id'],user['name'],user['email'],data.city,data.site_label,data.isp,data.access_medium,data.medium_evidence,'self_reported',data.wifi_type,data.device_label,key))
+        try:cur=db.execute('INSERT INTO volunteers(user_id,name,email,city,site_label,isp,access_medium,medium_evidence,medium_status,wifi_type,device_label,api_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(user['id'],user['name'],f"endpoint-{user['id']}-{secrets.token_hex(6)}@endpoint.netrivanta.invalid",data.city,data.site_label,data.isp,data.access_medium,data.medium_evidence,'self_reported',data.wifi_type,data.device_label,key))
         except Exception as e:
             if 'UNIQUE' in str(e):raise HTTPException(409,'This account already has a registered endpoint')
             raise
@@ -167,7 +169,7 @@ def volunteer_overview(user=Depends(current_user)):
     with connect() as db:return [dict(r) for r in db.execute('SELECT access_medium,COUNT(*) volunteer_count,SUM(active) active_count FROM volunteers GROUP BY access_medium ORDER BY access_medium').fetchall()]
 @app.get('/api/volunteers/mine')
 def my_volunteers(user=Depends(current_user)):
-    with connect() as db:return [dict(r) for r in db.execute('SELECT id,city,site_label,isp,access_medium,medium_status,wifi_type,created_at,active,(SELECT COUNT(*) FROM measurements m WHERE m.volunteer_id=v.id) measurement_count FROM volunteers v WHERE user_id=?',(user['id'],)).fetchall()]
+    with connect() as db:return [dict(r) for r in db.execute('SELECT id,city,site_label,isp,access_medium,medium_status,wifi_type,device_label,created_at,active,(SELECT COUNT(*) FROM measurements m WHERE m.volunteer_id=v.id) measurement_count FROM volunteers v WHERE user_id=?',(user['id'],)).fetchall()]
 @app.patch('/api/volunteers/{volunteer_id}/medium-review')
 def review_medium(volunteer_id:int,data:ReviewIn,user=Depends(admin_user)):
     if data.status not in {'verified','self_reported','rejected'}:raise HTTPException(422,'Invalid review status')
@@ -217,18 +219,18 @@ def submit_browser_measurement(data: BrowserMeasurementIn, user=Depends(current_
         measured_at = datetime.now(timezone.utc).isoformat()
         try:
             cur = db.execute('''INSERT INTO measurements
-                (volunteer_id,measured_at,latency_ms,download_mbps,upload_mbps,jitter_ms,target_host,
+                (volunteer_id,measured_at,latency_ms,packet_loss_pct,dns_delay_ms,download_mbps,upload_mbps,jitter_ms,target_host,
                  connection_interface,test_status,error_detail,session_date,session_name,timezone,measurement_method)
-                VALUES(?,?,?,?,?,?,?,'browser','complete','',?,?, 'Asia/Kolkata','browser_http')''',
-                (data.endpoint_id, measured_at, data.latency_ms, data.download_mbps, data.upload_mbps,
-                 data.jitter_ms, data.target_host[:200], session_date, session_name))
+                VALUES(?,?,?,?,?,?,?,?,?,'browser','complete','',?,?, 'Asia/Kolkata','browser_http')''',
+                (data.endpoint_id, measured_at, data.latency_ms, data.packet_loss_pct, data.dns_delay_ms,
+                 data.download_mbps, data.upload_mbps, data.jitter_ms, data.target_host[:200], session_date, session_name))
         except Exception as exc:
             if 'UNIQUE' in str(exc).upper():
                 raise HTTPException(409, 'A successful measurement is already recorded for this session.')
             raise
         return {'id': cur.lastrowid, 'endpoint_id': data.endpoint_id, 'measured_at': measured_at,
                 'session_date': session_date, 'session_name': session_name, 'timezone': 'Asia/Kolkata',
-                'measurement_method': 'browser_http', 'status': 'stored'}
+                'measurement_method': 'browser_http', 'packet_loss_pct': data.packet_loss_pct, 'dns_delay_ms': data.dns_delay_ms, 'status': 'stored'}
 
 
 @app.get('/api/measurements')

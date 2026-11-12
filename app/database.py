@@ -177,6 +177,8 @@ def init_db():
             db.execute('ALTER TABLE measurements ADD COLUMN IF NOT EXISTS session_name TEXT')
             db.execute('ALTER TABLE measurements ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT \'Asia/Kolkata\'')
             db.execute('ALTER TABLE measurements ADD COLUMN IF NOT EXISTS measurement_method TEXT NOT NULL DEFAULT \'python_agent\'')
+            db.execute('ALTER TABLE measurements ADD COLUMN IF NOT EXISTS packet_loss_pct DOUBLE PRECISION')
+            db.execute('ALTER TABLE measurements ADD COLUMN IF NOT EXISTS dns_delay_ms DOUBLE PRECISION')
             db.execute('CREATE INDEX IF NOT EXISTS idx_volunteers_user ON volunteers(user_id)')
         else:
             db.executescript(SQLITE_SCHEMA)
@@ -188,6 +190,7 @@ def init_db():
             migrations = {
                 'review_status': "TEXT NOT NULL DEFAULT 'pending'", 'session_date': 'TEXT', 'session_name': 'TEXT',
                 'timezone': "TEXT NOT NULL DEFAULT 'Asia/Kolkata'", 'measurement_method': "TEXT NOT NULL DEFAULT 'python_agent'",
+                'packet_loss_pct': 'REAL', 'dns_delay_ms': 'REAL',
             }
             for column, definition in migrations.items():
                 if column not in mcols: db.execute(f'ALTER TABLE measurements ADD COLUMN {column} {definition}')
